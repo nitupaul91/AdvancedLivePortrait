@@ -223,6 +223,7 @@ class LP_Engine:
         return pred[0].boxes.xyxy.cpu().numpy()
 
     def detect_face(self, image_rgb, crop_factor, sort = True):
+        print("detect_face called")
         bboxes = self.get_face_bboxes(image_rgb)
         w, h = get_rgb_size(image_rgb)
 
@@ -357,7 +358,7 @@ class LP_Engine:
         if is_changed: face_img = self.expand_img(face_img, crop_region)
         return face_img
 
-    def prepare_source(self, source_image, crop_factor, is_video = False, tracking = False):
+    def prepare_source(self, source_image, crop_factor, is_video=False, tracking=False, face_bbox=None):
         print("Prepare source...")
         engine = self.get_pipeline()
         source_image_np = (source_image * 255).byte().numpy()
@@ -366,8 +367,14 @@ class LP_Engine:
         psi_list = []
         for img_rgb in source_image_np:
             if tracking or len(psi_list) == 0:
-                crop_region = self.detect_face(img_rgb, crop_factor)
+                if face_bbox is not None:
+                    print(f"Using provided face_bbox: {face_bbox}")
+                    crop_region = face_bbox
+                else:
+                    print("No face_bbox provided. Using detect_face to find face.")
+                    crop_region = self.detect_face(img_rgb, crop_factor)
                 face_region, is_changed = self.calc_face_region(crop_region, get_rgb_size(img_rgb))
+                print(f"Calculated face_region: {face_region}, is_changed: {is_changed}")
 
                 s_x = (face_region[2] - face_region[0]) / 512.
                 s_y = (face_region[3] - face_region[1]) / 512.
@@ -380,13 +387,14 @@ class LP_Engine:
                     crop_trans_m = create_transform_matrix(crop_region[0], crop_region[1], s, s)
 
             face_img = rgb_crop(img_rgb, face_region)
-            if is_changed: face_img = self.expand_img(face_img, crop_region)
+            if is_changed:
+                face_img = self.expand_img(face_img, crop_region)
             i_s = self.prepare_src_image(face_img)
             x_s_info = engine.get_kp_info(i_s)
             f_s_user = engine.extract_feature_3d(i_s)
             x_s_user = engine.transform_keypoint(x_s_info)
             psi = PreparedSrcImg(img_rgb, crop_trans_m, x_s_info, f_s_user, x_s_user, mask_ori)
-            if is_video == False:
+            if not is_video:
                 return psi
             psi_list.append(psi)
 
@@ -862,6 +870,10 @@ class ExpressionEditor:
                 "sample_parts": (["OnlyExpression", "OnlyRotation", "OnlyMouth", "OnlyEyes", "All"],),
                 "crop_factor": ("FLOAT", {"default": crop_factor_default,
                                           "min": crop_factor_min, "max": crop_factor_max, "step": 0.1}),
+                "bounding_box_x1": ("INT", {"default": 0, "min": 0}),
+                "bounding_box_y1": ("INT", {"default": 0, "min": 0}),
+                "bounding_box_x2": ("INT", {"default": 0, "min": 0}),
+                "bounding_box_y2": ("INT", {"default": 0, "min": 0}),
             },
 
             "optional": {"src_image": ("IMAGE",), "motion_link": ("EDITOR_LINK",),
@@ -882,22 +894,37 @@ class ExpressionEditor:
     # OUTPUT_IS_LIST = (False,)
 
     def run(self, rotate_pitch, rotate_yaw, rotate_roll, blink, eyebrow, wink, pupil_x, pupil_y, aaa, eee, woo, smile,
-            src_ratio, sample_ratio, sample_parts, crop_factor, src_image=None, sample_image=None, motion_link=None, add_exp=None):
+            src_ratio, sample_ratio, sample_parts, crop_factor,
+            bounding_box_x1, bounding_box_y1, bounding_box_x2, bounding_box_y2,
+            src_image=None, sample_image=None, motion_link=None, add_exp=None):
         rotate_yaw = -rotate_yaw
 
+        face_bbox = [int(bounding_box_x1), int(bounding_box_y1), int(bounding_box_x2), int(bounding_box_y2)]
+
+        print(f"Received bounding box coordinates from UI: {face_bbox}")
         new_editor_link = None
-        if motion_link != None:
+        # Always recalculate and apply the bounding box on each execution
+        if motion_link is not None:
             self.psi = motion_link[0]
             new_editor_link = motion_link.copy()
-        elif src_image != None:
-            if id(src_image) != id(self.src_image) or self.crop_factor != crop_factor:
-                self.crop_factor = crop_factor
-                self.psi = g_engine.prepare_source(src_image, crop_factor)
-                self.src_image = src_image
-            new_editor_link = []
-            new_editor_link.append(self.psi)
+        elif src_image is not None:
+            self.crop_factor = crop_factor  # Update crop factor
+            # Validate the bounding box and force it to reapply
+            if any(coord == 0 for coord in face_bbox):
+                print("Invalid bounding box provided. Using auto-detection.")
+                face_bbox = None  # Use auto-detection
+            elif face_bbox[2] <= face_bbox[0] or face_bbox[3] <= face_bbox[1]:
+                print("Invalid bounding box dimensions. Using auto-detection.")
+                face_bbox = None
+            else:
+                print(f"Using provided bounding box: {face_bbox}")
+
+            # Force reset to reapply the bounding box each time
+            self.psi = g_engine.prepare_source(src_image, crop_factor, face_bbox=face_bbox)
+            self.src_image = src_image
+            new_editor_link = [self.psi]
         else:
-            return (None,None)
+            return (None, None, None)
 
         pipeline = g_engine.get_pipeline()
 
