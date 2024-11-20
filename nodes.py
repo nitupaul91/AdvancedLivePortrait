@@ -93,6 +93,29 @@ class PreparedSrcImg:
 import requests
 from tqdm import tqdm
 
+
+def apply_crop(x1, y1, x2, y2, crop_factor):
+    #for x1, y1, x2, y2 in bboxes:
+    bbox_w = x2 - x1
+    bbox_h = y2 - y1
+
+    crop_w = bbox_w * crop_factor
+    crop_h = bbox_h * crop_factor
+
+    crop_w = max(crop_h, crop_w)
+    crop_h = crop_w
+
+    kernel_x = int(x1 + bbox_w / 2)
+    kernel_y = int(y1 + bbox_h / 2)
+
+    new_x1 = int(kernel_x - crop_w / 2)
+    new_x2 = int(kernel_x + crop_w / 2)
+    new_y1 = int(kernel_y - crop_h / 2)
+    new_y2 = int(kernel_y + crop_h / 2)
+
+    return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
+
+
 class LP_Engine:
     pipeline = None
     detect_model = None
@@ -156,7 +179,7 @@ class LP_Engine:
             ckpt_path = os.path.join(get_model_dir("liveportrait"), model_type + ".safetensors")
             if os.path.isfile(ckpt_path) == False:
                 self.download_model(ckpt_path,
-                "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/main/" + model_type + ".safetensors")
+                                    "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/main/" + model_type + ".safetensors")
         model_params = model_config['model_params'][f'{model_type}_params']
         if model_type == 'appearance_feature_extractor':
             model = AppearanceFeatureExtractor(**model_params).to(device)
@@ -247,23 +270,7 @@ class LP_Engine:
 
         x1, y1, x2, y2 = best_box
 
-        #for x1, y1, x2, y2 in bboxes:
-        bbox_w = x2 - x1
-        bbox_h = y2 - y1
-
-        crop_w = bbox_w * crop_factor
-        crop_h = bbox_h * crop_factor
-
-        crop_w = max(crop_h, crop_w)
-        crop_h = crop_w
-
-        kernel_x = int(x1 + bbox_w / 2)
-        kernel_y = int(y1 + bbox_h / 2)
-
-        new_x1 = int(kernel_x - crop_w / 2)
-        new_x2 = int(kernel_x + crop_w / 2)
-        new_y1 = int(kernel_y - crop_h / 2)
-        new_y2 = int(kernel_y + crop_h / 2)
+        new_x1, new_x2, new_y1, new_y2 = apply_crop(x1, y1, x2, y2, crop_factor)
 
         if not sort:
             return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
@@ -297,7 +304,6 @@ class LP_Engine:
 
         return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
 
-
     def calc_face_region(self, square, dsize):
         region = copy.deepcopy(square)
         is_changed = False
@@ -314,7 +320,7 @@ class LP_Engine:
         #new_img = rgb_crop(rgb_img, face_region)
         crop_trans_m = create_transform_matrix(max(-square[0], 0), max(-square[1], 0), 1, 1)
         new_img = cv2.warpAffine(rgb_img, crop_trans_m, (square[2] - square[0], square[3] - square[1]),
-                                        cv2.INTER_LINEAR)
+                                 cv2.INTER_LINEAR)
         return new_img
 
     def get_pipeline(self):
@@ -369,7 +375,7 @@ class LP_Engine:
             if tracking or len(psi_list) == 0:
                 if face_bbox is not None:
                     print(f"Using provided face_bbox: {face_bbox}")
-                    crop_region = face_bbox
+                    crop_region = apply_crop(*face_bbox, crop_factor)
                 else:
                     print("No face_bbox provided. Using detect_face to find face.")
                     crop_region = self.detect_face(img_rgb, crop_factor)
@@ -539,8 +545,8 @@ class SaveExpData:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-                "file_name": ("STRING", {"multiline": False, "default": ""}),
-            },
+            "file_name": ("STRING", {"multiline": False, "default": ""}),
+        },
             "optional": {"save_exp": ("EXP_DATA",), }
         }
 
@@ -585,18 +591,18 @@ class ExpData:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":{
-                #"code": ("STRING", {"multiline": False, "default": ""}),
-                "code1": ("INT", {"default": 0}),
-                "value1": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
-                "code2": ("INT", {"default": 0}),
-                "value2": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
-                "code3": ("INT", {"default": 0}),
-                "value3": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
-                "code4": ("INT", {"default": 0}),
-                "value4": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
-                "code5": ("INT", {"default": 0}),
-                "value5": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
-            },
+            #"code": ("STRING", {"multiline": False, "default": ""}),
+            "code1": ("INT", {"default": 0}),
+            "value1": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
+            "code2": ("INT", {"default": 0}),
+            "value2": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
+            "code3": ("INT", {"default": 0}),
+            "value3": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
+            "code4": ("INT", {"default": 0}),
+            "value4": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
+            "code5": ("INT", {"default": 0}),
+            "value5": ("FLOAT", {"default": 0, "min": -100, "max": 100, "step": 0.1}),
+        },
             "optional":{"add_exp": ("EXP_DATA",),}
         }
 
@@ -878,7 +884,7 @@ class ExpressionEditor:
 
             "optional": {"src_image": ("IMAGE",), "motion_link": ("EDITOR_LINK",),
                          "sample_image": ("IMAGE",), "add_exp": ("EXP_DATA",),
-            },
+                         },
         }
 
     RETURN_TYPES = ("IMAGE", "EDITOR_LINK", "EXP_DATA")
@@ -960,7 +966,7 @@ class ExpressionEditor:
                 retargeting(es.e, self.d_info['exp'], sample_ratio, (1, 2, 11, 13, 15, 16))
 
         es.r = g_engine.calc_fe(es.e, blink, eyebrow, wink, pupil_x, pupil_y, aaa, eee, woo, smile,
-                                  rotate_pitch, rotate_yaw, rotate_roll)
+                                rotate_pitch, rotate_yaw, rotate_roll)
 
         if add_exp != None:
             es.add(add_exp)
